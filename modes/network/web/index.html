@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MecchaGomoku - 多人对战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+
+body{
+  background:#0a0a18;
+  color:#e0e0e0;
+  font-family:'Microsoft YaHei','PingFang SC','Segoe UI',sans-serif;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100vh;overflow:hidden;
+  user-select:none;-webkit-user-select:none;
+}
+
+/* ── starfield canvas (full-screen behind everything) ── */
+#stars{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  z-index:0;pointer-events:none;
+}
+
+/* ── content layer ── */
+#wrap{
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;align-items:center;
+}
+
+/* ── status bar ── */
+#status{
+  font-size:20px;font-weight:bold;margin:8px 0 4px;
+  color:#ffd700;min-height:30px;
+  text-shadow:0 0 12px rgba(255,215,0,0.4);
+  transition:color 0.3s;
+}
+#status.alert{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,0.5)}
+
+#info{
+  font-size:15px;color:#8899bb;margin-bottom:10px;min-height:24px;
+  letter-spacing:0.5px;
+}
+#info .turn-you{
+  color:#ffd700;font-weight:bold;
+  animation:pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse{
+  0%,100%{opacity:1} 50%{opacity:0.5}
+}
+
+/* ── board ── */
+#board{
+  cursor:pointer;
+  border-radius:6px;
+  box-shadow:0 0 30px rgba(100,140,200,0.25),0 0 60px rgba(100,140,200,0.1),
+             inset 0 0 0 2px rgba(255,255,255,0.05);
+  transition:box-shadow 0.4s;
+}
+#board:hover{
+  box-shadow:0 0 40px rgba(140,180,240,0.35),0 0 80px rgba(100,140,200,0.15),
+             inset 0 0 0 2px rgba(255,255,255,0.05);
+}
+
+/* ── overlay / dialog ── */
+#overlay{
+  display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(5,5,20,0.7);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  z-index:20;justify-content:center;align-items:center;
+}
+#overlay.show{display:flex;animation:fadeIn 0.25s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+#dlg{
+  background:linear-gradient(135deg,#1e1e3a 0%,#2a2a4a 100%);
+  border:1px solid rgba(255,215,0,0.3);
+  border-radius:16px;padding:34px 54px;text-align:center;max-width:400px;
+  box-shadow:0 0 40px rgba(100,100,200,0.2);
+  animation:slideUp 0.3s ease;
+}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+#dlg h2{color:#ffd700;margin-bottom:14px;font-size:24px;text-shadow:0 0 8px rgba(255,215,0,0.3)}
+#dlg p{color:#ccd;margin-bottom:22px;font-size:16px;line-height:1.7}
+#dlg button{
+  background:linear-gradient(135deg,#3a6fb5,#5080cc);
+  color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;
+  padding:11px 40px;font-size:18px;cursor:pointer;
+  transition:all 0.2s;letter-spacing:1px;
+}
+#dlg button:hover{
+  background:linear-gradient(135deg,#4a80cc,#6098e0);
+  box-shadow:0 0 16px rgba(80,130,210,0.4);transform:translateY(-1px);
+}
+
+/* ── color badges ── */
+.c-black{color:#ccc;text-shadow:0 0 6px rgba(255,255,255,0.3)}
+.c-white{color:#eee;text-shadow:0 0 6px rgba(255,255,255,0.5)}
+</style>
+</head>
+<body>
+
+<!-- starfield background -->
+<canvas id="stars"></canvas>
+
+<div id="wrap">
+  <div id="status">正在连接服务器...</div>
+  <div id="info"></div>
+  <canvas id="board"></canvas>
+</div>
+
+<div id="overlay">
+  <div id="dlg">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-msg"></p>
+    <button id="dlg-btn" onclick="dismissOverlay()">确定</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  STARFIELD  —  animated particle background
+// ═══════════════════════════════════════════════════════════
+const starsCanvas = document.getElementById('stars');
+const sctx = starsCanvas.getContext('2d');
+
+let stars = [];
+const STAR_COUNT = 180;
+
+function resizeStars(){
+  starsCanvas.width = window.innerWidth;
+  starsCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeStars);
+resizeStars();
+
+// Create stars: {x, y, r, speed, opacity, twinkle}
+for (let i = 0; i < STAR_COUNT; i++) {
+  stars.push({
+    x: Math.random() * starsCanvas.width,
+    y: Math.random() * starsCanvas.height,
+    r: Math.random() * 1.8 + 0.4,
+    speed: Math.random() * 0.35 + 0.08,
+    opacity: Math.random() * 0.7 + 0.3,
+    twinkle: Math.random() * Math.PI * 2,
+    twinkleSpeed: Math.random() * 0.02 + 0.005,
+  });
+}
+
+function drawStars(){
+  sctx.clearRect(0, 0, starsCanvas.width, starsCanvas.height);
+  for (const s of stars) {
+    s.twinkle += s.twinkleSpeed;
+    const alpha = s.opacity * (0.6 + 0.4 * Math.sin(s.twinkle));
+    sctx.beginPath();
+    sctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    sctx.fillStyle = `rgba(220,230,255,${alpha})`;
+    sctx.fill();
+  }
+}
+
+function updateStars(){
+  for (const s of stars) {
+    s.y -= s.speed;
+    // Small horizontal drift
+    s.x += Math.sin(s.twinkle) * 0.15;
+    // Wrap around
+    if (s.y < -5) { s.y = starsCanvas.height + 5; s.x = Math.random() * starsCanvas.width; }
+    if (s.x < -5) s.x = starsCanvas.width + 5;
+    if (s.x > starsCanvas.width + 5) s.x = -5;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GAME  —  Gomoku board + WebSocket
+// ═══════════════════════════════════════════════════════════
+const SIZE = 15;
+const CELL = 36;
+const MARGIN = 28;
+const BOARD_PX = MARGIN * 2 + (SIZE - 1) * CELL;
+const RADIUS = CELL * 0.44;
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+canvas.width = BOARD_PX;
+canvas.height = BOARD_PX;
+
+// ── state ──
+let ws = null;
+let myColor = null;
+let currentTurn = null;
+let gameStarted = false;
+let gameOver = false;
+let grid = Array.from({length:SIZE}, () => Array(SIZE).fill(null));
+let lastMove = null;
+let hoverCell = null;
+let glowPhase = 0;  // animated glow for last-move marker
+
+// ── WebSocket ──
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host + '/ws');
+
+  ws.onopen = () => {
+    setStatus('已连接，等待分配颜色...');
+  };
+
+  ws.onmessage = (e) => {
+    handleMessage(JSON.parse(e.data));
+  };
+
+  ws.onclose = () => {
+    if (!gameOver) {
+      setStatus('连接已断开');
+      showOverlay('连接中断', '与服务器的连接已断开');
+      gameOver = true;
+    }
+  };
+
+  ws.onerror = () => {
+    setStatus('连接失败，请刷新重试');
+  };
+}
+
+function send(obj){
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function handleMessage(msg){
+  switch (msg.type) {
+    case 'color_assign':
+      myColor = msg.color;
+      const colorLabel = myColor === 'BLACK'
+        ? '<span class="c-black">● 黑方</span>'
+        : '<span class="c-white">○ 白方</span>';
+      document.getElementById('status').innerHTML = '已连接 — 你执 ' + colorLabel;
+      setInfoText('等待对手准备...');
+      send({type:'ready'});
+      break;
+
+    case 'game_start':
+      currentTurn = msg.current_turn;
+      gameStarted = true;
+      document.getElementById('status').innerHTML =
+        '游戏开始！你执 ' + (myColor === 'BLACK'
+          ? '<span class="c-black">● 黑方</span>'
+          : '<span class="c-white">○ 白方</span>');
+      updateTurnInfo();
+      break;
+
+    case 'move':
+      grid[msg.row][msg.col] = msg.color;
+      lastMove = {row:msg.row, col:msg.col};
+      currentTurn = msg.color === 'BLACK' ? 'WHITE' : 'BLACK';
+      updateTurnInfo();
+      break;
+
+    case 'game_over':
+      gameOver = true;
+      const wn = msg.winner === 'BLACK' ? '黑方●' : msg.winner === 'WHITE' ? '白方○' : '';
+      const reason = msg.reason || '';
+      let title, desc;
+      if (!msg.winner) {
+        title = '平局！'; desc = '双方不分胜负';
+      } else if (myColor === msg.winner) {
+        title = '🎉 你赢了！'; desc = wn + ' 获胜';
+      } else {
+        title = '😞 你输了'; desc = wn + ' 获胜';
+      }
+      if (reason) desc += '<br>原因：' + reason;
+      document.getElementById('status').className = 'alert';
+      setStatus(title);
+      showOverlay(title, desc);
+      break;
+
+    case 'opponent_disconnected':
+      if (!gameOver) {
+        gameOver = true;
+        setStatus('对手已断开连接');
+        showOverlay('对手离开了', '对方已断开连接，你赢了！');
+      }
+      break;
+
+    case 'error':
+      setInfoText('⚠ ' + msg.message);
+      break;
+  }
+}
+
+// ── Board rendering ──
+function drawBoard(){
+  ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
+
+  // Board base — warm wood with subtle outer padding
+  const pad = 0;
+  ctx.fillStyle = '#c8a45c';
+  ctx.fillRect(pad, pad, BOARD_PX - pad*2, BOARD_PX - pad*2);
+
+  // Subtle inner gradient for depth
+  const bgGrad = ctx.createRadialGradient(BOARD_PX/2, BOARD_PX/2, BOARD_PX*0.1,
+                                           BOARD_PX/2, BOARD_PX/2, BOARD_PX*0.72);
+  bgGrad.addColorStop(0, '#d4b56a');
+  bgGrad.addColorStop(0.7, '#ba9450');
+  bgGrad.addColorStop(1, '#a07838');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(pad, pad, BOARD_PX - pad*2, BOARD_PX - pad*2);
+
+  // Grid lines
+  ctx.strokeStyle = '#3a2a10';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < SIZE; i++) {
+    ctx.beginPath();
+    ctx.moveTo(MARGIN, MARGIN + i * CELL);
+    ctx.lineTo(MARGIN + (SIZE-1) * CELL, MARGIN + i * CELL);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(MARGIN + i * CELL, MARGIN);
+    ctx.lineTo(MARGIN + i * CELL, MARGIN + (SIZE-1) * CELL);
+    ctx.stroke();
+  }
+
+  // Outer border
+  ctx.strokeStyle = '#5a3a10';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(MARGIN - 2, MARGIN - 2, (SIZE-1)*CELL + 4, (SIZE-1)*CELL + 4);
+
+  // Star points
+  const starPts = [[3,3],[3,7],[3,11],[7,3],[7,7],[7,11],[11,3],[11,7],[11,11]];
+  ctx.fillStyle = '#2a1a08';
+  for (const [r,c] of starPts) {
+    ctx.beginPath();
+    ctx.arc(MARGIN + c*CELL, MARGIN + r*CELL, 3.8, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Hover preview (semi-transparent)
+  if (hoverCell && !grid[hoverCell.r][hoverCell.c] && gameStarted && !gameOver
+      && currentTurn === myColor) {
+    const hx = MARGIN + hoverCell.c * CELL;
+    const hy = MARGIN + hoverCell.r * CELL;
+    ctx.beginPath();
+    ctx.arc(hx, hy, RADIUS, 0, Math.PI*2);
+    ctx.fillStyle = myColor === 'BLACK' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)';
+    ctx.fill();
+  }
+
+  // Stones
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (!grid[r][c]) continue;
+      const sx = MARGIN + c * CELL;
+      const sy = MARGIN + r * CELL;
+
+      // Shadow
+      ctx.beginPath();
+      ctx.arc(sx + 1.5, sy + 2, RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fill();
+
+      // Stone body with gradient
+      const grad = ctx.createRadialGradient(sx-4, sy-5, RADIUS*0.1, sx, sy, RADIUS);
+      if (grid[r][c] === 'BLACK') {
+        grad.addColorStop(0, '#6a6a6a');
+        grad.addColorStop(0.5, '#2a2a2a');
+        grad.addColorStop(1, '#000');
+      } else {
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.5, '#f0f0f0');
+        grad.addColorStop(1, '#c0c0c0');
+      }
+      ctx.beginPath();
+      ctx.arc(sx, sy, RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // Subtle rim
+      ctx.strokeStyle = grid[r][c] === 'BLACK' ? 'rgba(0,0,0,0.5)' : 'rgba(150,150,150,0.6)';
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+
+      // Specular highlight
+      ctx.beginPath();
+      ctx.arc(sx - RADIUS*0.28, sy - RADIUS*0.3, RADIUS*0.22, 0, Math.PI*2);
+      ctx.fillStyle = grid[r][c] === 'BLACK'
+        ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.55)';
+      ctx.fill();
+    }
+  }
+
+  // Last-move marker — pulsing red diamond
+  if (lastMove) {
+    const lx = MARGIN + lastMove.col * CELL;
+    const ly = MARGIN + lastMove.row * CELL;
+    const pulse = 4.5 + Math.sin(glowPhase) * 1.5;
+    const alpha = 0.7 + Math.sin(glowPhase) * 0.3;
+
+    // Outer glow ring
+    ctx.beginPath();
+    ctx.arc(lx, ly, RADIUS + 3, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(255,60,60,${alpha * 0.4})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Center marker
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(Math.PI/4);
+    ctx.fillStyle = `rgba(255,50,50,${alpha})`;
+    ctx.fillRect(-pulse, -pulse, pulse*2, pulse*2);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-2, -2, 4, 4);
+    ctx.restore();
+  }
+}
+
+// ── Mouse interaction ──
+canvas.addEventListener('mousemove', (e) => {
+  if (!gameStarted || gameOver || currentTurn !== myColor) {
+    if (hoverCell) { hoverCell = null; }
+    return;
+  }
+  const pos = pixelToGrid(e);
+  if (pos && !grid[pos.r][pos.c]) {
+    hoverCell = pos;
+  } else {
+    hoverCell = null;
+  }
+});
+
+canvas.addEventListener('mouseleave', () => { hoverCell = null; });
+
+canvas.addEventListener('click', (e) => {
+  if (!gameStarted || gameOver) return;
+  if (currentTurn !== myColor) return;
+
+  const pos = pixelToGrid(e);
+  if (!pos) return;
+  const {r:row, c:col} = pos;
+  if (grid[row][col] !== null) return;
+
+  // Optimistic update
+  grid[row][col] = myColor;
+  lastMove = {row, col};
+  currentTurn = (myColor === 'BLACK') ? 'WHITE' : 'BLACK';
+  hoverCell = null;
+  updateTurnInfo();
+
+  send({type:'move', row, col});
+});
+
+function pixelToGrid(e){
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = BOARD_PX / rect.width;
+  const scaleY = BOARD_PX / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  const col = Math.round((mx - MARGIN) / CELL);
+  const row = Math.round((my - MARGIN) / CELL);
+  if (row < 0 || row >= SIZE || col < 0 || col >= SIZE) return null;
+  const cx = MARGIN + col * CELL;
+  const cy = MARGIN + row * CELL;
+  if (Math.abs(mx - cx) > CELL/2 || Math.abs(my - cy) > CELL/2) return null;
+  return {r:row, c:col};
+}
+
+// ── UI ──
+function setStatus(text){
+  const el = document.getElementById('status');
+  el.className = '';
+  el.innerHTML = text;
+}
+function setInfoText(text){
+  document.getElementById('info').innerHTML = text;
+}
+function updateTurnInfo(){
+  if (!gameStarted || gameOver) return;
+  const turnName = currentTurn === 'BLACK'
+    ? '<span class="c-black">● 黑方</span>'
+    : '<span class="c-white">○ 白方</span>';
+  const isMyTurn = currentTurn === myColor;
+  let html = '当前回合: ' + turnName;
+  if (lastMove) {
+    html += ' &nbsp;|&nbsp; 上一步: (' + lastMove.row + ', ' + lastMove.col + ')';
+  }
+  if (isMyTurn) {
+    html += ' &nbsp;|&nbsp; <span class="turn-you">● 轮到你了</span>';
+  }
+  document.getElementById('info').innerHTML = html;
+}
+function showOverlay(title, msg){
+  document.getElementById('dlg-title').innerHTML = title;
+  document.getElementById('dlg-msg').innerHTML = msg;
+  document.getElementById('overlay').classList.add('show');
+}
+function dismissOverlay(){
+  document.getElementById('overlay').classList.remove('show');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════
+function animate(ts){
+  updateStars();
+  drawStars();
+  // Glow phase for last-move marker
+  glowPhase += 0.04;
+  drawBoard();
+  requestAnimationFrame(animate);
+}
+
+// ── Init ──
+drawBoard();
+connect();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
