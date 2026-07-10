@@ -1,10 +1,17 @@
 """
 Player-vs-AI mode.
 Human chooses black or white; the AI (Rapfi engine) plays the other color.
+
+Non-blocking design:
+  - AI思考 runs in a background thread (the engine subprocess reader).
+  - The update() method polls for the AI's move each frame so the UI
+    never freezes — the board, hover preview, and "AI思考中..." indicator
+    all keep rendering smoothly.
 """
 
 from __future__ import annotations
 
+from enum import Enum, auto
 import pygame
 
 from core.game_manager import GameManager, GameState
@@ -12,6 +19,14 @@ from core.stone import StoneColor
 from core.ai_engine import RapfiEngine, shutdown_engine
 from modes.base_mode import BaseMode
 from ui.board_view import BoardView
+
+
+class _AIState(Enum):
+    """Internal state machine for the non-blocking AI turn cycle."""
+    INIT = auto()           # engine initializing (update_init called each frame)
+    IDLE = auto()           # waiting for human input
+    REQUESTING = auto()     # need to send TURN + BEGIN to engine (next update)
+    THINKING = auto()       # engine is searching; poll_move() each frame
 
 
 class AIVsMode(BaseMode):
@@ -25,22 +40,28 @@ class AIVsMode(BaseMode):
         self.board_view = board_view
         self.human_color = human_color
         self.ai_color = human_color.opponent()
-        self._ai_thinking = False
+        self._state = _AIState.INIT
         self._engine: RapfiEngine | None = None
         self.hover_pos: tuple[int, int] | None = None
+        # Human's last move — sent to engine via TURN command
+        self._last_human_move: tuple[int, int] = (-1, -1)
+
+    @property
+    def is_ai_thinking(self) -> bool:
+        """True when the AI is searching (used by renderer for status text)."""
+        if self._engine is None:
+            return False
+        return self._state in (_AIState.INIT, _AIState.THINKING) or self._engine.is_thinking
 
     def on_enter(self) -> None:
         self.gm.new_game()
 
-        # Start the Rapfi engine (first move obtained inside start() if AI is Black)
         self._engine = RapfiEngine()
         if not self._engine.start(ai_color=self.ai_color):
             self._engine = None
             return
 
-        # If AI plays black, its first move is ready — trigger immediately
-        if self.ai_color == StoneColor.BLACK:
-            self._ai_thinking = True
+        self._state = _AIState.INIT
 
     def on_exit(self) -> None:
         if self._engine:
@@ -51,7 +72,11 @@ class AIVsMode(BaseMode):
         if self.gm.state != GameState.PLAYING:
             return
 
-        # Hover preview (always track, but only show on human's turn)
+        # Don't accept input while engine is still initializing
+        if self._state == _AIState.INIT:
+            return
+
+        # ── Hover preview (always track, show only on human's turn) ──
         if event.type == pygame.MOUSEMOTION:
             pos = self.board_view.pixel_to_grid(*event.pos)
             if pos is not None and self.gm.board.is_empty(*pos):
@@ -59,6 +84,7 @@ class AIVsMode(BaseMode):
             else:
                 self.hover_pos = None
 
+        # Only the human can click to place stones
         if self.gm.current_turn != self.human_color:
             return
 
@@ -68,32 +94,40 @@ class AIVsMode(BaseMode):
                 row, col = pos
                 if self.gm.place_stone(row, col):
                     self.hover_pos = None
-                    self._ai_thinking = True  # trigger AI in update()
+                    self._last_human_move = (row, col)
+                    self._state = _AIState.REQUESTING
 
     def update(self) -> None:
-        """Called each frame — if it's the AI's turn, request a move."""
-        if (
-            self._ai_thinking
-            and self._engine is not None
-            and self.gm.state == GameState.PLAYING
-            and self.gm.current_turn == self.ai_color
-        ):
-            self._ai_thinking = False
-            move = self._request_ai_move()
+        """Called each frame — drives the non-blocking AI lifecycle."""
+        if self._engine is None:
+            return
+
+        # ── Phase 1: engine initialization (non-blocking) ──
+        if self._state == _AIState.INIT:
+            result = self._engine.update_init()
+            if result == "ready":
+                # If AI is Black, its first move was already requested in
+                # update_init() and stored in _first_move.
+                first = self._engine.get_first_move()
+                if first is not None:
+                    self.gm.place_stone(*first)
+                self._state = _AIState.IDLE
+            elif result == "failed":
+                self._engine.stop()
+                self._engine = None
+            return  # don't process gameplay until init finishes
+
+        if self.gm.state != GameState.PLAYING:
+            return
+
+        # ── Phase 2: send move request to engine ──
+        if self._state == _AIState.REQUESTING and self.gm.current_turn == self.ai_color:
+            self._engine.request_move(*self._last_human_move)
+            self._state = _AIState.THINKING
+
+        # ── Phase 3: poll for AI response ──
+        if self._state == _AIState.THINKING:
+            move = self._engine.poll_move()
             if move is not None:
                 self.gm.place_stone(*move)
-
-    # ── AI integration ──────────────────────────────────
-
-    def _request_ai_move(self) -> tuple[int, int] | None:
-        """Get the AI's next move from the Rapfi engine."""
-        if self._engine is None:
-            return None
-
-        last_stone = self.gm.board.last_move()
-        if last_stone and last_stone.color == self.human_color:
-            opp_row, opp_col = last_stone.row, last_stone.col
-        else:
-            opp_row, opp_col = -1, -1
-
-        return self._engine.get_move(opp_row, opp_col)
+                self._state = _AIState.IDLE
