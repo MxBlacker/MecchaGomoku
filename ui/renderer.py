@@ -27,7 +27,7 @@ from ui.board_view import BoardView
 from ui.menu import MainMenu
 from ui.settings_screen import SettingsScreen
 from ui.history_screen import HistoryScreen
-from ui.popup import Popup, WaitingPopup
+from ui.popup import Popup, WaitingPopup, ColorChoicePopup
 from ui.widgets import ImageButton
 from modes.local_pvp import LocalPvPMode
 from modes.ai_mode import AIVsMode
@@ -119,6 +119,9 @@ class Renderer:
         # Multiplayer waiting / result popups
         self._waiting_popup: Optional[WaitingPopup] = None
 
+        # AI color-choice popup
+        self._color_choice_popup: Optional[ColorChoicePopup] = None
+
         # Replay mode (reused)
         self._replay_mode = ReplayMode(self.gm, self.board_view, self.recorder)
         self._replay_mode._on_done = self._on_replay_done
@@ -169,6 +172,11 @@ class Renderer:
 
         # BGM track-end → auto-advance playlist
         self._bgm.handle_event(event)
+
+        # Color-choice popup (AI mode) — swallows events
+        if self._color_choice_popup and self._color_choice_popup.visible:
+            self._color_choice_popup.handle_event(event)
+            return
 
         # Waiting popup (multiplayer) — swallows events but doesn't block BGM
         if self._waiting_popup and self._waiting_popup.visible:
@@ -255,6 +263,10 @@ class Renderer:
 
         elif self._screen == "game":
             self._draw_game_content()
+
+        # Color-choice popup (AI mode)
+        if self._color_choice_popup and self._color_choice_popup.visible:
+            self._color_choice_popup.draw(self.screen)
 
         # Waiting popup (multiplayer)
         if self._waiting_popup and self._waiting_popup.visible:
@@ -693,13 +705,20 @@ class Renderer:
         self._screen = "game"
 
     def _on_start_ai(self) -> None:
-        self.gm.game_mode = "ai"
-        self._active_mode = AIVsMode(self.gm, self.board_view)
-        self._active_mode.on_enter()
-        self._prev_move_count = 0
-        self._last_black_move = None
-        self._last_white_move = None
-        self._screen = "game"
+        """Show color-choice popup, then start AI game with chosen color."""
+        def on_choose(color_name: str):
+            human_color = StoneColor[color_name]
+            self.gm.game_mode = "ai"
+            self._active_mode = AIVsMode(self.gm, self.board_view,
+                                         human_color=human_color)
+            self._active_mode.on_enter()
+            self._prev_move_count = 0
+            self._last_black_move = None
+            self._last_white_move = None
+            self._screen = "game"
+            self._color_choice_popup = None
+
+        self._color_choice_popup = ColorChoicePopup(on_choose)
 
     def _on_start_multiplayer(self) -> None:
         self.gm.game_mode = "network"
@@ -847,16 +866,28 @@ class Renderer:
             ay = board_top + 25
             self.screen.blit(self._black_avatar, (ax, ay))
 
+        # Determine player names for AI mode
+        is_ai_mode = isinstance(self._active_mode, AIVsMode)
+        if is_ai_mode:
+            ai_mode = self._active_mode
+            black_name = "智能AI" if ai_mode.ai_color == StoneColor.BLACK else "玩家"
+            white_name = "智能AI" if ai_mode.ai_color == StoneColor.WHITE else "玩家"
+        else:
+            black_name = "玩家1"
+            white_name = "玩家2"
+
         # Text left-aligned, grows downward from below the avatar
         black_lines = []
-        black_lines.append(("玩家1", font_name, c_white))
+        black_lines.append((black_name, font_name, c_white))
         if self._last_black_move:
             label = pos_to_label(self._last_black_move[0], self._last_black_move[1])
             black_lines.append((f"落子: {label}", font_pos, c_gray))
         else:
             black_lines.append(("落子: -", font_pos, c_gray))
         if self.gm.state == GameState.PLAYING and self.gm.current_turn == StoneColor.BLACK:
-            black_lines.append(("轮到你了", font_turn, c_gold))
+            turn_text = "轮到你了" if (not is_ai_mode or ai_mode.human_color == StoneColor.BLACK) else "AI思考中..."
+            turn_color = c_gold if (not is_ai_mode or ai_mode.human_color == StoneColor.BLACK) else (100, 200, 255)
+            black_lines.append((turn_text, font_turn, turn_color))
 
         tx = board_left - AVATAR_SIZE - gap  # left edge, aligned with avatar
         ty = board_top + 25 + AVATAR_SIZE + 18  # just below avatar
@@ -871,13 +902,15 @@ class Renderer:
         # Text left-aligned, grows upward from above the avatar
         white_lines = []
         if self.gm.state == GameState.PLAYING and self.gm.current_turn == StoneColor.WHITE:
-            white_lines.append(("轮到你了", font_turn, c_gold))
+            turn_text = "轮到你了" if (not is_ai_mode or ai_mode.human_color == StoneColor.WHITE) else "AI思考中..."
+            turn_color = c_gold if (not is_ai_mode or ai_mode.human_color == StoneColor.WHITE) else (100, 200, 255)
+            white_lines.append((turn_text, font_turn, turn_color))
         if self._last_white_move:
             label = pos_to_label(self._last_white_move[0], self._last_white_move[1])
             white_lines.append((f"落子: {label}", font_pos, c_gray))
         else:
             white_lines.append(("落子: -", font_pos, c_gray))
-        white_lines.append(("玩家2", font_name, c_white))
+        white_lines.append((white_name, font_name, c_white))
 
         tx = board_right + gap  # left edge, aligned with avatar
         ty = board_bottom - 25 - AVATAR_SIZE - 18  # just above avatar — bottom of text block

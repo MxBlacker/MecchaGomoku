@@ -1,0 +1,26 @@
+﻿  Yixin - Gomoku/Renju playing program
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  License for use and distribution
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. All copyrights to Yixin including both the engine and the GUI are exclusively owned by the author - Kai Sun.
+
+2. You are only allowd to retrieve Yixin for NON-COMMERCIAL USE. If you wish to use any part of Yixin for commercial use, please contact Kai Sun by sending an email to sunkaicn@gmail.com
+
+3. Yixin IS DISTRIBUTED "AS IS". NO WARRANTY OF ANY KIND IS EXPRESSED OR IMPLIED. YOU USE AT YOUR OWN RISK.  NEITHER THE AUTHOR NOR THE AGENTS OF THE AUTHOR WILL BE LIABLE FOR DATA LOSS, DAMAGES, LOSS OF PROFITS OR ANY OTHER KIND OF LOSS WHILE USING OR MISUSING THIS SOFTWARE.
+
+4. You may not emulate, clone, rent, lease, sell, modify, decompile, disassemble, or reverse engineer except as provided for in this agreement. Any such unauthorized use shall result in immediate and automatic termination of this license and may result in criminal and/or civil prosecution.
+
+   All rights not expressly granted here are reserved by author.
+
+5. Installing and using Yixin signifies acceptance of these terms and conditions of the license.
+ 
+6. If you do not agree with the terms of this license you must remove Yixin files from your storage devices and cease to use the product.
+
+   Thank you for using Yixin.
+
+   Kai Sun
+
+   sunkaicn@gmail.com
+   www.aiexp.info
+

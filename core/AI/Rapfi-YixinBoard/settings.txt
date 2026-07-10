@@ -1,0 +1,47 @@
+15	;board size (10 ~ 22)
+0	;language (0: English, 1,2,...: custom)
+2	;rule (0: freestyle, 1: standard, 2: free renju, 3: swap after 1st move, 5: soosorv, 6: swap-2)
+0	;computer play black (0: no, 1: yes)
+1	;computer play white (0: no, 1: yes)
+0	;level (0: unlimited time 1: custom level 2-12: predefined level)
+2000	;time limit (turn)
+100000	;time limit (match)
+100	;max depth
+1000000000	;max node
+3	;style (rash 0 ~ 5 cautious)
+2	;toolbar style (0: only icon, 1: both icon and words, 2: both with horizontally stacked)
+1	;show log (0: no, 1: yes)
+1	;show number (0: no, 1: yes)
+1	;show analysis (0: no, 1: yes)
+1	;show analysis winrate (0: no, 1: yes)
+1	;show warning (0: no, 1: yes)
+8	;number of threads
+2048	;hash size (MB)
+3	;default number of multi-pv
+1	;block autoreset (0: no, 1: yes)
+0	;blockpath autoreset (0: no, 1: yes)
+0	;pondering (0: off, 1: on)
+0	;checkmate in global search (0: no, 1: vct, 2: vc2)
+0	;hash autoclear (0: no, 1: yes)
+0	;toolbar postion (0: left vertical, 1: right horizontal)
+0	;enable dark mode
+0	;show clock (0: no, 1: yes)
+0	;time increment per move
+1	;show forbidden moves
+1	;check timeout
+1	;use database moves (0: no, 1: yes)
+0	;enable database read-only mode (0: no, 1: yes)
+1	;show database baord texts (0: no, 1: yes)
+1	;show database delall confirmation (0: no, 1: yes)
+0	;record debug log
+140	;log area horizontal scale
+0	;symmetric nbest for the 5th moves
+0	;lossing move color saturation (0~100)
+83	;winning move color saturation (0~100)
+20	;min winrate color saturation (0~100)
+80	;max winrate color saturation (0~100)
+100	;value of color (0~100)
+SimHei, sans-serif 12;Board Text Font
+Sarasa Mono SC, Cascadia Mono, SimHei, monospace 9;Text Log Font
+SimHei, sans-serif 12;Database Comment Font
+Courier New, monospace 10;Database Comment Font

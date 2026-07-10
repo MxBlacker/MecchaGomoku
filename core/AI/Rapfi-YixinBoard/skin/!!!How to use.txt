@@ -1,0 +1,3 @@
+Replace the file piece.bmp in the Yixin directory with the file here,
+then restart Yixin program.
+The interface will be changed.

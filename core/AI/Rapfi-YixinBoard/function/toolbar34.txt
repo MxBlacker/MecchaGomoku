@@ -1,0 +1,9 @@
+300
+utilities-terminal
+
+send board
+command on
+traceboard
+tracesearch
+command off
+

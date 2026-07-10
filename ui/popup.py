@@ -86,6 +86,108 @@ class Popup:
         surface.blit(btn_text, (bt_x, bt_y))
 
 
+class ColorChoicePopup:
+    """
+    Pre-game popup for AI mode — lets the player choose black or white.
+    """
+
+    W, H = 420, 220
+
+    def __init__(self, on_choose):
+        """
+        on_choose(color_name: str) — called with "BLACK" or "WHITE" when player picks.
+        """
+        self._on_choose = on_choose
+        self.visible = True
+
+        self.rect = pygame.Rect(
+            (WINDOW_WIDTH - self.W) // 2,
+            (WINDOW_HEIGHT - self.H) // 2,
+            self.W,
+            self.H,
+        )
+
+        from utils.fonts import get_font, get_title_font
+        self._font_title = get_title_font(28)
+        self._font_btn = get_font(22)
+        self._font_hint = get_font(18)
+
+        btn_w, btn_h = 150, 48
+        gap = 30
+        total_w = btn_w * 2 + gap
+        start_x = self.rect.centerx - total_w // 2
+        btn_y = self.rect.centery + 10
+
+        self._black_rect = pygame.Rect(start_x, btn_y, btn_w, btn_h)
+        self._white_rect = pygame.Rect(start_x + btn_w + gap, btn_y, btn_w, btn_h)
+        self._black_hovered = False
+        self._white_hovered = False
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        if not self.visible:
+            return
+
+        if event.type == pygame.MOUSEMOTION:
+            self._black_hovered = self._black_rect.collidepoint(event.pos)
+            self._white_hovered = self._white_rect.collidepoint(event.pos)
+
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._black_hovered:
+                self.visible = False
+                if self._on_choose:
+                    self._on_choose("BLACK")
+            elif self._white_hovered:
+                self.visible = False
+                if self._on_choose:
+                    self._on_choose("WHITE")
+
+    def draw(self, surface: pygame.Surface) -> None:
+        if not self.visible:
+            return
+
+        # Overlay
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        surface.blit(overlay, (0, 0))
+
+        # Box
+        pygame.draw.rect(surface, (40, 40, 50), self.rect, border_radius=10)
+        pygame.draw.rect(surface, (200, 200, 200), self.rect, width=2, border_radius=10)
+
+        # Title
+        title = self._font_title.render("人机对战 — 选择你的棋子", True, (255, 215, 0))
+        tx = self.rect.centerx - title.get_width() // 2
+        surface.blit(title, (tx, self.rect.top + 30))
+
+        # Hint
+        hint = self._font_hint.render("黑棋先行，白棋后手", True, (160, 160, 180))
+        surface.blit(hint, (self.rect.centerx - hint.get_width() // 2, self.rect.top + 72))
+
+        # Black button
+        self._draw_choice_btn(surface, self._black_rect, "● 执黑先手",
+                              self._black_hovered, is_black=True)
+
+        # White button
+        self._draw_choice_btn(surface, self._white_rect, "○ 执白后手",
+                              self._white_hovered, is_black=False)
+
+    def _draw_choice_btn(self, surface, rect, text, hovered, *, is_black):
+        if is_black:
+            base = (50, 50, 55)
+            hover = (70, 70, 75)
+            border = (180, 180, 190)
+        else:
+            base = (55, 55, 50)
+            hover = (75, 75, 70)
+            border = (190, 190, 180)
+        color = hover if hovered else base
+        pygame.draw.rect(surface, color, rect, border_radius=8)
+        pygame.draw.rect(surface, border, rect, width=1, border_radius=8)
+        label = self._font_btn.render(text, True, (255, 255, 255))
+        surface.blit(label, (rect.centerx - label.get_width() // 2,
+                             rect.centery - label.get_height() // 2))
+
+
 class WaitingPopup:
     """
     Waiting-room popup for multiplayer — shows a URL, a copy button,
