@@ -3,6 +3,19 @@ Game configuration constants for MecchaGomoku.
 Centralizes all tunable parameters in one place.
 """
 
+import sys
+import os
+
+
+def resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        base = sys._MEIPASS
+    except AttributeError:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
+
+
 # ── Board ──────────────────────────────────────────────
 BOARD_SIZE = 15          # 15x15 standard Gomoku board
 STONE_RADIUS = 17        # radius of a placed stone
@@ -56,7 +69,7 @@ RECORDS_DIR  = f"{DATA_DIR}/records"
 DEEPSEEK_API_TOKEN = ""   # <-- 在这里粘贴你的 API Token
 
 # ── Assets paths ───────────────────────────────────────
-ASSETS_DIR   = "assets"
+ASSETS_DIR   = resource_path("assets")
 IMG_DIR      = f"{ASSETS_DIR}/img"
 SFX_DIR      = f"{ASSETS_DIR}/sfx"
 
@@ -88,6 +101,10 @@ SETTINGS_FILE   = f"{DATA_DIR}/settings.json"
 
 # ── BGM ────────────────────────────────────────────────
 BGM_DIR        = f"{ASSETS_DIR}/bgm"
+
+# ── Fonts ───────────────────────────────────────────────
+FONTS_DIR = f"{ASSETS_DIR}/fonts"
+CJK_FONT  = f"{FONTS_DIR}/NotoSansSC-VF.ttf"
 
 # ── Menu button images ──────────────────────────────────
 MENU_BTN_SCALE = 0.70     # scale buttons to 40% of original 425×135

@@ -2,7 +2,7 @@
 0	;language (0: English, 1,2,...: custom)
 2	;rule (0: freestyle, 1: standard, 2: free renju, 3: swap after 1st move, 5: soosorv, 6: swap-2)
 0	;computer play black (0: no, 1: yes)
-1	;computer play white (0: no, 1: yes)
+0	;computer play white (0: no, 1: yes)
 0	;level (0: unlimited time 1: custom level 2-12: predefined level)
 2000	;time limit (turn)
 100000	;time limit (match)
@@ -28,7 +28,7 @@
 0	;show clock (0: no, 1: yes)
 0	;time increment per move
 1	;show forbidden moves
-1	;check timeout
+0	;check timeout
 1	;use database moves (0: no, 1: yes)
 0	;enable database read-only mode (0: no, 1: yes)
 1	;show database baord texts (0: no, 1: yes)

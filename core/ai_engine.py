@@ -19,9 +19,10 @@ import time
 from typing import Optional
 
 from core.stone import StoneColor
+from config import resource_path
 
 
-_AI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "AI", "Rapfi-YixinBoard")
+_AI_DIR = resource_path("core/AI/Rapfi-YixinBoard")
 _ENGINE_EXE = os.path.join(_AI_DIR, "engine.exe")
 _CONFIG_PATH = os.path.join(_AI_DIR, "config_piskvork.toml")
 

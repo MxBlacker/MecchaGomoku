@@ -303,6 +303,9 @@ class Renderer:
             r, c = self._active_mode.hover_pos
             self.board_view.draw_hover_preview(self.screen, r, c, self.gm.current_turn)
 
+        # Hover coordinate tooltip (follows mouse cursor)
+        self._draw_hover_coord_tooltip()
+
         self._draw_status_bar()
 
         # Stone count badge (bottom-right)
@@ -310,6 +313,9 @@ class Renderer:
 
     def _draw_replay_content(self) -> None:
         self.board_view.draw(self.screen, self.gm.board)
+
+        # Hover coordinate tooltip (follows mouse cursor)
+        self._draw_hover_coord_tooltip()
 
         rm = self._replay_mode
         font = get_font(22)
@@ -637,6 +643,56 @@ class Renderer:
 
         self.screen.blit(s1, (bg_x + pad, bg_y + pad))
         self.screen.blit(s2, (bg_x + pad, bg_y + pad + s1.get_height() + gap))
+
+    # ── Hover coordinate tooltip ──────────────────────────
+
+    def _draw_hover_coord_tooltip(self) -> None:
+        """
+        Draw a coordinate label (e.g. 'H8') to the right of the mouse cursor
+        whenever the cursor hovers over a valid board intersection.
+
+        The label is rendered on a rounded, semi-transparent black backdrop
+        that follows the mouse.
+        """
+        mx, my = pygame.mouse.get_pos()
+        pos = self.board_view.pixel_to_grid(mx, my)
+        if pos is None:
+            return
+
+        row, col = pos
+        label = pos_to_label(row, col)  # e.g. "H8"
+
+        font = get_font(28)
+        text_surf = font.render(label, True, (255, 255, 255))
+        tw, th = text_surf.get_size()
+
+        # Rounded semi-transparent black backdrop
+        pad_x = 16
+        pad_y = 8
+        bg_w = tw + pad_x * 2
+        bg_h = th + pad_y * 2
+
+        # Place the tooltip to the right of the cursor, slightly above
+        gap = 18  # pixels between cursor and tooltip
+        bg_x = mx + gap
+        bg_y = my - bg_h // 2
+
+        # Keep the tooltip on screen
+        if bg_x + bg_w > WINDOW_WIDTH - 4:
+            bg_x = mx - bg_w - gap   # flip to left side if it would overflow right
+        if bg_y < MENU_BAR_HEIGHT + 4:
+            bg_y = MENU_BAR_HEIGHT + 4
+        if bg_y + bg_h > WINDOW_HEIGHT - 4:
+            bg_y = WINDOW_HEIGHT - bg_h - 4
+
+        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (0, 0, 0, 185), bg.get_rect(), border_radius=10)
+        self.screen.blit(bg, (bg_x, bg_y))
+
+        # Draw label text centered in the backdrop
+        text_x = bg_x + pad_x
+        text_y = bg_y + pad_y
+        self.screen.blit(text_surf, (text_x, text_y))
 
     # ── Popup ───────────────────────────────────────────
 

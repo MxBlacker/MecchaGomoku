@@ -5,6 +5,12 @@ Includes Renju-style forbidden-move (禁手) detection for black:
   - 四四禁手 (double-four)
   - 长连禁手 (over-line, 6+)
   五连优先 — a five-in-a-row always wins, ignoring any simultaneous forbidden patterns.
+
+Key improvements over the previous version:
+  - check_win() uses == 5 (not >= 5) so 长连 is not mis-classified as a win.
+  - Four / three detection uses 5-cell sliding windows, which correctly
+    handles jump-fours (跳四) and jump-threes (跳三), not just consecutive lines.
+  - Each direction reports only the strongest pattern (five > overline > four > three).
 """
 
 from __future__ import annotations
@@ -24,13 +30,20 @@ _DIRECTIONS = [
     (1, -1),  # diagonal ↙
 ]
 
+# Number of cells to examine on each side of the placed stone.
+# 5 cells each way + center = 11 cells total.
+# This is enough to detect any five-in-a-row, overline, four, or three
+# pattern that includes the placed stone.
+_WINDOW_RADIUS = 5
+
 
 # ── Five-in-a-row win check ────────────────────────────────────
 
 def check_win(board: "Board", row: int, col: int) -> "StoneColor | None":
     """
-    Check if the stone placed at (row, col) creates a line of 5 (or more).
+    Check if the stone placed at (row, col) creates a line of EXACTLY 5.
 
+    Uses == 5 (not >= 5) so that overline (长连, 6+) is NOT treated as a win.
     Returns the winning StoneColor, or None if no win.
     """
     color = board.get_color(row, col)
@@ -39,19 +52,16 @@ def check_win(board: "Board", row: int, col: int) -> "StoneColor | None":
 
     for dr, dc in _DIRECTIONS:
         count = 1  # the stone itself
+        count += _count_consecutive(board, row, col, dr, dc, color)
+        count += _count_consecutive(board, row, col, -dr, -dc, color)
 
-        # Count in positive direction
-        count += _count_in_direction(board, row, col, dr, dc, color)
-        # Count in negative direction
-        count += _count_in_direction(board, row, col, -dr, -dc, color)
-
-        if count >= 5:
+        if count == 5:
             return color
 
     return None
 
 
-def _count_in_direction(
+def _count_consecutive(
     board: "Board", row: int, col: int, dr: int, dc: int, color: "StoneColor"
 ) -> int:
     """Count consecutive same-color stones starting one step away from (row, col)."""
@@ -67,48 +77,142 @@ def _count_in_direction(
     return count
 
 
-# ── Line analysis for forbidden-move detection ──────────────────
+# ── Line extraction ────────────────────────────────────────────
 
-def _analyze_line(
-    board: "Board", row: int, col: int, dr: int, dc: int, color: "StoneColor"
-) -> tuple[int, bool, bool]:
+def _extract_line(
+    board: "Board", row: int, col: int, dr: int, dc: int
+) -> tuple[list[StoneColor | None | str], int]:
     """
-    Analyze the consecutive line of *color* stones through (row, col)
-    along direction (dr, dc).
+    Extract a line segment centered on (row, col) along direction (dr, dc).
 
-    Returns (count, end1_open, end2_open):
-      - count:        number of consecutive same-color stones including (row, col)
-      - end1_open:    True if the cell just beyond the line in the +direction is empty
-      - end2_open:    True if the cell just beyond the line in the -direction is empty
+    Returns (cells, center_idx) where:
+      - cells is a list of length up to 2*_WINDOW_RADIUS + 1
+      - Each element is StoneColor, None (empty), or 'edge' (out-of-bounds)
+      - center_idx is the index of (row, col) within the list
     """
     size = board.size
+    cells: list[StoneColor | None | str] = []
 
-    # Count in positive direction
-    count_pos = 0
-    r, c = row + dr, col + dc
-    while 0 <= r < size and 0 <= c < size and board.get_color(r, c) == color:
-        count_pos += 1
-        r += dr
-        c += dc
-    # Is the cell just beyond the positive end open?
-    end1_open = (
-        0 <= r < size and 0 <= c < size and board.get_color(r, c) is None
-    )
+    for i in range(-_WINDOW_RADIUS, _WINDOW_RADIUS + 1):
+        r, c = row + i * dr, col + i * dc
+        if 0 <= r < size and 0 <= c < size:
+            cells.append(board.get_color(r, c))
+        else:
+            cells.append('edge')
 
-    # Count in negative direction
-    count_neg = 0
-    r, c = row - dr, col - dc
-    while 0 <= r < size and 0 <= c < size and board.get_color(r, c) == color:
-        count_neg += 1
-        r -= dr
-        c -= dc
-    # Is the cell just beyond the negative end open?
-    end2_open = (
-        0 <= r < size and 0 <= c < size and board.get_color(r, c) is None
-    )
+    return cells, _WINDOW_RADIUS
 
-    return 1 + count_pos + count_neg, end1_open, end2_open
 
+# ── Direction analysis (the core of forbidden-move detection) ──
+
+def _analyze_direction(
+    board: "Board", row: int, col: int, dr: int, dc: int, color: "StoneColor"
+) -> dict:
+    """
+    Analyze one direction through (row, col) for Gomoku patterns.
+
+    Returns a dict with boolean keys:
+      'five'     — exactly 5 consecutive stones (五连)
+      'overline' — 6+ consecutive stones (长连)
+      'four'     — the placed stone participates in a four pattern
+                   (4 same-color in a 5-cell window that includes the placed stone,
+                    i.e. one move away from completing a five)
+      'three'    — the placed stone participates in a three pattern
+                   (3 stones that can become an open-four in one move)
+
+    Priority: five > overline > four > three
+    Only the strongest pattern in this direction is reported.
+    """
+    cells, center = _extract_line(board, row, col, dr, dc)
+    result = {'five': False, 'overline': False, 'four': False, 'three': False}
+
+    # ── 1. Consecutive count through the placed stone ──
+    consecutive = 1
+    # positive direction
+    for i in range(center + 1, len(cells)):
+        if cells[i] == color:
+            consecutive += 1
+        else:
+            break
+    # negative direction
+    for i in range(center - 1, -1, -1):
+        if cells[i] == color:
+            consecutive += 1
+        else:
+            break
+
+    if consecutive >= 6:
+        result['overline'] = True
+        return result
+    if consecutive == 5:
+        result['five'] = True
+        return result
+
+    # ── 2. Four detection: 5-cell sliding windows ──
+    # A "four" = 4 same-color + 1 empty in any 5-cell window
+    # that includes the placed stone (center).
+    for start in range(len(cells) - 4):
+        if not (start <= center < start + 5):
+            continue  # window must contain the placed stone
+        window = cells[start:start + 5]
+        same = sum(1 for c in window if c == color)
+        empty = sum(1 for c in window if c is None)
+        opponent = sum(1 for c in window if c not in (color, None))
+        if same == 4 and empty == 1 and opponent == 0:
+            result['four'] = True
+            break
+
+    # ── 3. Three detection: can it become an open four? ──
+    # An "open four" (活四) = exactly 4 consecutive same-color stones
+    # with BOTH adjacent cells empty (not 'edge', not opponent).
+    # A "three" is a pattern where adding ONE stone at some empty cell
+    # would create an open four that INCLUDES the placed stone.
+    if not result['four']:
+        for empty_idx in range(len(cells)):
+            if cells[empty_idx] is not None:
+                continue  # only try placing at empty cells
+
+            # Check every possible 4-core window that includes center
+            # and the hypothetical placement
+            for core_start in range(len(cells) - 3):
+                core_end = core_start + 3
+                if not (core_start <= center <= core_end):
+                    continue
+                if not (core_start <= empty_idx <= core_end):
+                    continue
+
+                # Would the core be all same-color after placing at empty_idx?
+                core_all_same = True
+                for j in range(core_start, core_end + 1):
+                    cell_val = color if j == empty_idx else cells[j]
+                    if cell_val != color:
+                        core_all_same = False
+                        break
+
+                if not core_all_same:
+                    continue
+
+                # Check that both ends are OPEN (empty and not 'edge')
+                left_end = cells[core_start - 1] if core_start > 0 else 'edge'
+                right_end = cells[core_end + 1] if core_end + 1 < len(cells) else 'edge'
+
+                # Adjust ends if the hypothetical stone is at an end position
+                if empty_idx == core_start - 1:
+                    left_end = color  # would be occupied, not open
+                if empty_idx == core_end + 1:
+                    right_end = color  # would be occupied, not open
+
+                if left_end is None and right_end is None:
+                    result['three'] = True
+                    break
+
+            if result['three']:
+                break
+
+    return result
+
+
+# ── Forbidden-move check ───────────────────────────────────────
 
 def check_forbidden(board: "Board", row: int, col: int) -> tuple[bool, Optional[str]]:
     """
@@ -118,7 +222,7 @@ def check_forbidden(board: "Board", row: int, col: int) -> tuple[bool, Optional[
 
     Detection order (五连优先):
       1. If the move creates a five-in-a-row → NOT forbidden (black wins).
-      2. Otherwise check 长连 (≥6), 三三 (≥2 open-threes), 四四 (≥2 fours).
+      2. Otherwise check 长连 (≥6), 三三 (≥2 threes), 四四 (≥2 fours).
 
     Returns (is_forbidden, reason_string_or_None).
     """
@@ -134,20 +238,16 @@ def check_forbidden(board: "Board", row: int, col: int) -> tuple[bool, Optional[
     has_five = False
 
     for dr, dc in _DIRECTIONS:
-        count, end1_open, end2_open = _analyze_line(board, row, col, dr, dc, color)
+        info = _analyze_direction(board, row, col, dr, dc, color)
 
-        if count >= 6:
-            has_over_line = True
-        elif count == 5:
+        if info['five']:
             has_five = True
-        elif count == 4:
-            # A "four" that can still become five requires at least one open end
-            if end1_open or end2_open:
-                fours += 1
-        elif count == 3:
-            # An "open three" (活三) requires BOTH ends to be open
-            if end1_open and end2_open:
-                open_threes += 1
+        elif info['overline']:
+            has_over_line = True
+        elif info['four']:
+            fours += 1
+        elif info['three']:
+            open_threes += 1
 
     # 五连优先 — five-in-a-row always wins, ignore all forbidden patterns
     if has_five:
