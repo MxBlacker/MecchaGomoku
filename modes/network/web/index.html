@@ -178,13 +178,23 @@ function updateStars(){
 const SIZE = 15;
 const CELL = 36;
 const MARGIN = 28;
+const LABEL = 22;  // extra margin for coordinate labels (A-O bottom, 1-15 left)
 const BOARD_PX = MARGIN * 2 + (SIZE - 1) * CELL;
+const CANVAS_W = BOARD_PX + LABEL;
+const CANVAS_H = BOARD_PX + LABEL;
+const BOARD_OFFSET_X = LABEL;  // board grid shifts right to make room for row labels
+const BOARD_OFFSET_Y = 0;      // board grid stays at top; column labels go below
 const RADIUS = CELL * 0.44;
+
+// Coordinate display: A1 = bottom-left (row=SIZE-1, col=0)
+function posToLabel(row, col) {
+  return String.fromCharCode(65 + col) + (SIZE - row);
+}
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
-canvas.width = BOARD_PX;
-canvas.height = BOARD_PX;
+canvas.width = CANVAS_W;
+canvas.height = CANVAS_H;
 
 // ── state ──
 let ws = null;
@@ -288,57 +298,79 @@ function handleMessage(msg){
   }
 }
 
+// Helper: convert canvas pixel to grid intersection pixel (with label offset)
+function gridX(c) { return BOARD_OFFSET_X + MARGIN + c * CELL; }
+function gridY(r) { return BOARD_OFFSET_Y + MARGIN + r * CELL; }
+
 // ── Board rendering ──
 function drawBoard(){
-  ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-  // Board base — warm wood with subtle outer padding
-  const pad = 0;
+  // Board base — warm wood
   ctx.fillStyle = '#c8a45c';
-  ctx.fillRect(pad, pad, BOARD_PX - pad*2, BOARD_PX - pad*2);
+  ctx.fillRect(BOARD_OFFSET_X, BOARD_OFFSET_Y, BOARD_PX, BOARD_PX);
 
   // Subtle inner gradient for depth
-  const bgGrad = ctx.createRadialGradient(BOARD_PX/2, BOARD_PX/2, BOARD_PX*0.1,
-                                           BOARD_PX/2, BOARD_PX/2, BOARD_PX*0.72);
+  const bgGrad = ctx.createRadialGradient(
+    BOARD_OFFSET_X + BOARD_PX/2, BOARD_OFFSET_Y + BOARD_PX/2, BOARD_PX*0.1,
+    BOARD_OFFSET_X + BOARD_PX/2, BOARD_OFFSET_Y + BOARD_PX/2, BOARD_PX*0.72);
   bgGrad.addColorStop(0, '#d4b56a');
   bgGrad.addColorStop(0.7, '#ba9450');
   bgGrad.addColorStop(1, '#a07838');
   ctx.fillStyle = bgGrad;
-  ctx.fillRect(pad, pad, BOARD_PX - pad*2, BOARD_PX - pad*2);
+  ctx.fillRect(BOARD_OFFSET_X, BOARD_OFFSET_Y, BOARD_PX, BOARD_PX);
 
   // Grid lines
   ctx.strokeStyle = '#3a2a10';
   ctx.lineWidth = 1;
   for (let i = 0; i < SIZE; i++) {
     ctx.beginPath();
-    ctx.moveTo(MARGIN, MARGIN + i * CELL);
-    ctx.lineTo(MARGIN + (SIZE-1) * CELL, MARGIN + i * CELL);
+    ctx.moveTo(gridX(0), gridY(i));
+    ctx.lineTo(gridX(SIZE-1), gridY(i));
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(MARGIN + i * CELL, MARGIN);
-    ctx.lineTo(MARGIN + i * CELL, MARGIN + (SIZE-1) * CELL);
+    ctx.moveTo(gridX(i), gridY(0));
+    ctx.lineTo(gridX(i), gridY(SIZE-1));
     ctx.stroke();
   }
 
   // Outer border
   ctx.strokeStyle = '#5a3a10';
   ctx.lineWidth = 2.5;
-  ctx.strokeRect(MARGIN - 2, MARGIN - 2, (SIZE-1)*CELL + 4, (SIZE-1)*CELL + 4);
+  ctx.strokeRect(gridX(0) - 2, gridY(0) - 2, (SIZE-1)*CELL + 4, (SIZE-1)*CELL + 4);
 
   // Star points
   const starPts = [[3,3],[3,7],[3,11],[7,3],[7,7],[7,11],[11,3],[11,7],[11,11]];
   ctx.fillStyle = '#2a1a08';
   for (const [r,c] of starPts) {
     ctx.beginPath();
-    ctx.arc(MARGIN + c*CELL, MARGIN + r*CELL, 3.8, 0, Math.PI*2);
+    ctx.arc(gridX(c), gridY(r), 3.8, 0, Math.PI*2);
     ctx.fill();
+  }
+
+  // ── Coordinate labels ──
+  ctx.fillStyle = '#bbaa88';
+  ctx.font = '11px "Microsoft YaHei","PingFang SC",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  // Column labels: A-O at the bottom (below the board)
+  for (let c = 0; c < SIZE; c++) {
+    const label = String.fromCharCode(65 + c);  // A-O
+    ctx.fillText(label, gridX(c), BOARD_PX + 4);
+  }
+  // Row labels: 1-15 on the left (1=bottom, 15=top)
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let r = 0; r < SIZE; r++) {
+    const label = SIZE - r;  // row 0 (top) = 15, row 14 (bottom) = 1
+    ctx.fillText(label, BOARD_OFFSET_X - 5, gridY(r));
   }
 
   // Hover preview (semi-transparent)
   if (hoverCell && !grid[hoverCell.r][hoverCell.c] && gameStarted && !gameOver
       && currentTurn === myColor) {
-    const hx = MARGIN + hoverCell.c * CELL;
-    const hy = MARGIN + hoverCell.r * CELL;
+    const hx = gridX(hoverCell.c);
+    const hy = gridY(hoverCell.r);
     ctx.beginPath();
     ctx.arc(hx, hy, RADIUS, 0, Math.PI*2);
     ctx.fillStyle = myColor === 'BLACK' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)';
@@ -349,8 +381,8 @@ function drawBoard(){
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
       if (!grid[r][c]) continue;
-      const sx = MARGIN + c * CELL;
-      const sy = MARGIN + r * CELL;
+      const sx = gridX(c);
+      const sy = gridY(r);
 
       // Shadow
       ctx.beginPath();
@@ -389,8 +421,8 @@ function drawBoard(){
 
   // Last-move marker — pulsing red diamond
   if (lastMove) {
-    const lx = MARGIN + lastMove.col * CELL;
-    const ly = MARGIN + lastMove.row * CELL;
+    const lx = gridX(lastMove.col);
+    const ly = gridY(lastMove.row);
     const pulse = 4.5 + Math.sin(glowPhase) * 1.5;
     const alpha = 0.7 + Math.sin(glowPhase) * 0.3;
 
@@ -450,15 +482,15 @@ canvas.addEventListener('click', (e) => {
 
 function pixelToGrid(e){
   const rect = canvas.getBoundingClientRect();
-  const scaleX = BOARD_PX / rect.width;
-  const scaleY = BOARD_PX / rect.height;
+  const scaleX = CANVAS_W / rect.width;
+  const scaleY = CANVAS_H / rect.height;
   const mx = (e.clientX - rect.left) * scaleX;
   const my = (e.clientY - rect.top) * scaleY;
-  const col = Math.round((mx - MARGIN) / CELL);
-  const row = Math.round((my - MARGIN) / CELL);
+  const col = Math.round((mx - BOARD_OFFSET_X - MARGIN) / CELL);
+  const row = Math.round((my - BOARD_OFFSET_Y - MARGIN) / CELL);
   if (row < 0 || row >= SIZE || col < 0 || col >= SIZE) return null;
-  const cx = MARGIN + col * CELL;
-  const cy = MARGIN + row * CELL;
+  const cx = gridX(col);
+  const cy = gridY(row);
   if (Math.abs(mx - cx) > CELL/2 || Math.abs(my - cy) > CELL/2) return null;
   return {r:row, c:col};
 }
@@ -480,7 +512,7 @@ function updateTurnInfo(){
   const isMyTurn = currentTurn === myColor;
   let html = '当前回合: ' + turnName;
   if (lastMove) {
-    html += ' &nbsp;|&nbsp; 上一步: (' + lastMove.row + ', ' + lastMove.col + ')';
+    html += ' &nbsp;|&nbsp; 上一步: ' + posToLabel(lastMove.row, lastMove.col);
   }
   if (isMyTurn) {
     html += ' &nbsp;|&nbsp; <span class="turn-you">● 轮到你了</span>';

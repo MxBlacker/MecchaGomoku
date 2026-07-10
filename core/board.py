@@ -78,3 +78,22 @@ class Board:
     def get_grid(self) -> list[list[Optional[StoneColor]]]:
         """Return a shallow snapshot of the grid (for rendering)."""
         return [row[:] for row in self._grid]
+
+
+# ── Coordinate display helpers ─────────────────────────
+# Internal: _grid[row][col], row 0=top, col 0=left
+# Display:  A1=bottom-left (row=14, col=0), O15=top-right (row=0, col=14)
+
+def row_to_label(row: int, board_size: int = 15) -> str:
+    """Convert internal row index to display number (bottom=1, top=15)."""
+    return str(board_size - row)
+
+
+def col_to_label(col: int) -> str:
+    """Convert internal col index to display letter (left=A, right=O)."""
+    return chr(ord('A') + col)
+
+
+def pos_to_label(row: int, col: int, board_size: int = 15) -> str:
+    """Convert internal (row, col) to display label like 'A1' (bottom-left)."""
+    return f"{col_to_label(col)}{row_to_label(row, board_size)}"

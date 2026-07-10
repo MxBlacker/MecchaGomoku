@@ -50,6 +50,11 @@ BUFFER_SIZE  = 4096
 DATA_DIR     = "data"
 RECORDS_DIR  = f"{DATA_DIR}/records"
 
+# ── DeepSeek AI ───────────────────────────────────────
+# 在此填入你的 DeepSeek API Token，用于复盘时的 AI 分析
+# 获取地址: https://platform.deepseek.com/api_keys
+DEEPSEEK_API_TOKEN = ""   # <-- 在这里粘贴你的 API Token
+
 # ── Assets paths ───────────────────────────────────────
 ASSETS_DIR   = "assets"
 IMG_DIR      = f"{ASSETS_DIR}/img"
@@ -96,6 +101,7 @@ BTN_SETTING         = f"{IMG_DIR}/setting_button.png"
 TITLE_IMG           = f"{IMG_DIR}/title.png"
 EXIT_BUTTON_IMG     = f"{IMG_DIR}/exit_button.png"
 MINIMIZE_BUTTON_IMG = f"{IMG_DIR}/minimize_button.png"
+DEEPSEEK_GIRL_IMG   = f"{IMG_DIR}/deepseek_girl.png"
 
 # ── Menu bar ────────────────────────────────────────────
 MENU_BAR_HEIGHT = 50       # reserved space at the top of the window

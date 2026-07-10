@@ -16,10 +16,12 @@ from config import (
     BOARD_OFFSET_X, BOARD_OFFSET_Y, BOARD_SIZE, CELL_SIZE, MARGIN,
     MENU_BAR_HEIGHT, MENU_BAR_BTN_SCALE,
     EXIT_BUTTON_IMG, MINIMIZE_BUTTON_IMG,
+    DEEPSEEK_GIRL_IMG,
     BLACK_AVATAR_IMG, WHITE_AVATAR_IMG, AVATAR_SIZE,
 )
 from core.game_manager import GameManager, GameState
 from core.stone import StoneColor
+from core.board import pos_to_label
 from core.recorder import GameRecorder
 from ui.board_view import BoardView
 from ui.menu import MainMenu
@@ -74,6 +76,9 @@ class Renderer:
         # Player avatars
         self._black_avatar = self._load_avatar(BLACK_AVATAR_IMG)
         self._white_avatar = self._load_avatar(WHITE_AVATAR_IMG)
+
+        # DeepSeek AI girl character (for replay AI panel)
+        self._deepseek_girl = self._load_deepseek_girl()
 
         # Last move position per player
         self._last_black_move: tuple[int, int] | None = None
@@ -288,20 +293,33 @@ class Renderer:
 
         self._draw_status_bar()
 
+        # Stone count badge (bottom-right)
+        self._draw_stone_count(self.gm.board)
+
     def _draw_replay_content(self) -> None:
         self.board_view.draw(self.screen, self.gm.board)
 
         rm = self._replay_mode
         font = get_font(22)
+
+        # ── AI analysis panel ─────────────────────────────
+        if rm.ai_panel_visible:
+            self._draw_ai_panel(rm)
+
+        # ── Bottom control bar (with black backdrop) ────────
+        font = get_font(22)
+        font_sm = get_font(18)
+
+        # Gather all bottom text lines to measure the backdrop
+        bottom_lines: list[tuple[str, pygame.font.Font, tuple[int, int, int]]] = []
+
         info = f"复盘  {rm.move_index}/{rm.total_moves}  "
         if rm.is_playing:
             info += "▶ 自动播放中"
         else:
-            info += "← → 步进  |  SPACE 自动  |  ESC 返回"
-        text = font.render(info, True, COLOR_TEXT)
-        self.screen.blit(text, (WINDOW_WIDTH // 2 - text.get_width() // 2, WINDOW_HEIGHT - 76))
+            info += "← → 步进  |  SPACE 自动  |  A 切换AI面板  |  ESC 返回"
+        bottom_lines.append((info, font, COLOR_TEXT))
 
-        # Show current move detail
         if rm.total_moves > 0 and 1 <= rm.move_index <= rm.total_moves:
             move = rm.record.moves[rm.move_index - 1]
             if move.get("action") == "undo":
@@ -309,15 +327,14 @@ class Renderer:
                 detail = f"{color_name} 悔棋一步"
             else:
                 color_name = "● 黑方" if move["color"] == "BLACK" else "○ 白方"
-                detail = f"{color_name} → ({move['row']}, {move['col']})"
-            dtext = get_font(18).render(detail, True, (200, 200, 220))
-            self.screen.blit(dtext, (WINDOW_WIDTH // 2 - dtext.get_width() // 2, WINDOW_HEIGHT - 50))
+                label = pos_to_label(move["row"], move["col"])
+                detail = f"{color_name} → {label}"
+            bottom_lines.append((detail, font_sm, (200, 200, 220)))
 
         if rm.move_index == rm.total_moves and rm.total_moves > 0:
             winner = rm.record.winner
             if winner:
                 badge = f"胜者: {'● 黑方' if winner == 'BLACK' else '○ 白方'}"
-                # Annotate win reason if present in the record
                 wr = rm.record.win_reason
                 if wr and wr != "五连":
                     reason_label = {
@@ -330,8 +347,161 @@ class Renderer:
                     badge += "（五连）"
             else:
                 badge = "平局"
-            btext = font.render(badge, True, (255, 215, 0))
-            self.screen.blit(btext, (20, WINDOW_HEIGHT - 50))
+            bottom_lines.append((badge, font, (255, 215, 0)))
+
+        if bottom_lines:
+            # Measure all lines
+            max_w = 0
+            total_h = 0
+            for text, f, _ in bottom_lines:
+                tw, th = f.size(text)
+                if tw > max_w:
+                    max_w = tw
+                total_h += th
+            total_h += max(0, len(bottom_lines) - 1) * 4  # gaps between lines
+
+            pad = 14
+            bg_w = max_w + pad * 2
+            bg_h = total_h + pad * 2
+            bg_x = WINDOW_WIDTH // 2 - bg_w // 2
+            bg_y = WINDOW_HEIGHT - 80 - pad
+            bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 160))
+            pygame.draw.rect(bg, (50, 50, 70, 180), bg.get_rect(), width=1, border_radius=10)
+            self.screen.blit(bg, (bg_x, bg_y))
+
+            # Draw text centered
+            y = bg_y + pad
+            for text, f, color in bottom_lines:
+                surf = f.render(text, True, color)
+                x = WINDOW_WIDTH // 2 - surf.get_width() // 2
+                self.screen.blit(surf, (x, y))
+                y += f.get_height() + 4
+
+        # Stone count badge (bottom-right)
+        self._draw_stone_count(self.gm.board)
+
+    # ── AI Analysis panel drawing ────────────────────────
+
+    def _draw_ai_panel(self, rm) -> None:
+        """
+        Draw the AI analysis panel during replay:
+        - Left side: analysis text with black rounded-rect background
+        - Right side: deepseek_girl character image
+        Both panels are vertically aligned with the board.
+        """
+        board_top = BOARD_OFFSET_Y
+        board_bottom = BOARD_OFFSET_Y + self._board_px_h
+        board_left = BOARD_OFFSET_X
+        board_right = board_left + self._board_px_w
+
+        # ── Right panel: DeepSeek girl ────────────────────
+        girl_x = 0  # will be set below
+        if self._deepseek_girl:
+            girl_w = self._deepseek_girl.get_width()
+            girl_h = self._deepseek_girl.get_height()
+            # Right-align: put girl to the right of the board, centered vertically
+            girl_gap = 15
+            girl_x = board_right + girl_gap
+            girl_y = board_top + (self._board_px_h - girl_h) // 2
+
+            # Don't overflow window
+            if girl_x + girl_w > WINDOW_WIDTH - 10:
+                girl_x = WINDOW_WIDTH - girl_w - 10
+
+            self.screen.blit(self._deepseek_girl, (girl_x, girl_y))
+
+            # Label below girl
+            label_font = get_font(18)
+            label = label_font.render("DeepSeek AI 分析", True, (100, 180, 255))
+            label_x = girl_x + (girl_w - label.get_width()) // 2
+            label_y = girl_y + girl_h + 6
+            self.screen.blit(label, (label_x, label_y))
+
+            # Pending indicator (thinking dots)
+            if rm.ai_pending:
+                dots = "." * (1 + int(pygame.time.get_ticks() / 600) % 3)
+                pending = label_font.render(f"分析中{dots}", True, (255, 200, 100))
+                self.screen.blit(pending, (label_x + 20, label_y + 22))
+
+        # ── Left panel: AI analysis text ──────────────────
+        ai_text = rm.ai_text
+        if not ai_text:
+            return
+
+        # Panel: sits to the left of the board, same height as board
+        panel_x = 10
+        panel_y = board_top
+        # Width: from left edge to just before the board (leave 10px gap)
+        panel_w = board_left - 20 - panel_x
+        panel_h = self._board_px_h
+
+        # Draw background with round corners
+        bg_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(bg_surf, (0, 0, 0, 195), bg_surf.get_rect(), border_radius=12)
+        # Subtle border
+        pygame.draw.rect(bg_surf, (60, 60, 90, 180), bg_surf.get_rect(), width=1, border_radius=12)
+        self.screen.blit(bg_surf, (panel_x, panel_y))
+
+        # Title
+        title_font = get_font(18)
+        title = title_font.render("💬 AI 分析", True, (100, 200, 255))
+        self.screen.blit(title, (panel_x + 12, panel_y + 10))
+
+        # Draw wrapped text
+        text_font = get_font(17)
+        line_h = text_font.get_linesize()
+        text_area_w = panel_w - 24
+        text_start_y = panel_y + 36
+        text_area_h = panel_h - 48  # leave margin for title + bottom padding
+
+        wrapped_lines = self._wrap_text(ai_text, text_font, text_area_w)
+        visible_lines = text_area_h // line_h
+
+        for i, line in enumerate(wrapped_lines):
+            if i >= visible_lines:
+                break
+            # If last visible line and there's more, show ellipsis
+            if i == visible_lines - 1 and len(wrapped_lines) > visible_lines:
+                line = line[:max(0, len(line) - 3)] + "..."
+            line_surf = text_font.render(line, True, (230, 230, 240))
+            self.screen.blit(line_surf, (panel_x + 12, text_start_y + i * line_h))
+
+    @staticmethod
+    def _wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
+        """Wrap text into lines that fit within max_width pixels.
+        Handles both CJK characters (break anywhere) and Latin words (break on spaces)."""
+        lines: list[str] = []
+        for paragraph in text.split("\n"):
+            if not paragraph:
+                lines.append("")
+                continue
+
+            current_line = ""
+            for ch in paragraph:
+                # Try adding this character
+                test_line = current_line + ch
+                if font.size(test_line)[0] <= max_width:
+                    current_line = test_line
+                else:
+                    # Line is full — try to break at a space for Latin text
+                    if current_line:
+                        # Look back for a space to break at
+                        break_at = current_line.rfind(" ")
+                        if break_at > len(current_line) // 2:
+                            # Break at the space
+                            lines.append(current_line[:break_at])
+                            current_line = current_line[break_at + 1:] + ch
+                        else:
+                            # No good space break — just break here
+                            lines.append(current_line)
+                            current_line = ch
+                    else:
+                        # Single character wider than max_width, force it
+                        current_line = ch
+            if current_line:
+                lines.append(current_line)
+        return lines
 
     def _draw_bg_or_fill(self) -> None:
         """Fill with deep space color, draw background, then starfield on top."""
@@ -414,6 +584,47 @@ class Renderer:
         self.screen.blit(bg_overlay, bg_rect)
 
         self.screen.blit(text, (x, y))
+
+    # ── Stone count badge ─────────────────────────────────
+
+    def _draw_stone_count(self, board) -> None:
+        """Draw a small badge showing black/white stone counts (bottom-right)."""
+        black_cnt = 0
+        white_cnt = 0
+        for r in range(board.size):
+            for c in range(board.size):
+                stone = board.get_color(r, c)
+                if stone is None:
+                    continue
+                if stone.name == "BLACK":
+                    black_cnt += 1
+                else:
+                    white_cnt += 1
+
+        font = get_font(18)
+        line1 = f"● 黑方 {black_cnt}"
+        line2 = f"○ 白方 {white_cnt}"
+
+        s1 = font.render(line1, True, (220, 220, 220))
+        s2 = font.render(line2, True, (220, 220, 220))
+
+        pad = 10
+        gap = 4
+        bg_w = max(s1.get_width(), s2.get_width()) + pad * 2
+        bg_h = s1.get_height() + s2.get_height() + pad * 2 + gap
+
+        # Position: top-right, below the menu bar, above the white avatar
+        board_right = BOARD_OFFSET_X + self._board_px_w
+        bg_x = board_right + 15
+        bg_y = MENU_BAR_HEIGHT + 20
+
+        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 150))
+        pygame.draw.rect(bg, (60, 60, 90, 180), bg.get_rect(), width=1, border_radius=8)
+        self.screen.blit(bg, (bg_x, bg_y))
+
+        self.screen.blit(s1, (bg_x + pad, bg_y + pad))
+        self.screen.blit(s2, (bg_x + pad, bg_y + pad + s1.get_height() + gap))
 
     # ── Popup ───────────────────────────────────────────
 
@@ -586,6 +797,24 @@ class Renderer:
         except FileNotFoundError:
             return None
 
+    @staticmethod
+    def _load_deepseek_girl() -> pygame.Surface | None:
+        """Load the DeepSeek girl character image, scale to fit the right panel."""
+        try:
+            img = pygame.image.load(DEEPSEEK_GIRL_IMG).convert_alpha()
+            # Scale to fill the right side space, keeping aspect ratio
+            board_right = BOARD_OFFSET_X + MARGIN * 2 + (BOARD_SIZE - 1) * CELL_SIZE
+            max_w = WINDOW_WIDTH - board_right - 30   # available right-side width
+            board_px_h = MARGIN * 2 + (BOARD_SIZE - 1) * CELL_SIZE
+            max_h = board_px_h                         # match board height
+            # Scale so both dimensions fit
+            ratio = min(max_w / img.get_width(), max_h / img.get_height())
+            target_w = int(img.get_width() * ratio)
+            target_h = int(img.get_height() * ratio)
+            return pygame.transform.smoothscale(img, (target_w, target_h))
+        except FileNotFoundError:
+            return None
+
     def _update_last_move(self) -> None:
         """Read the last stone from the board and record which color moved."""
         stone = self.gm.board.last_move()
@@ -622,9 +851,8 @@ class Renderer:
         black_lines = []
         black_lines.append(("玩家1", font_name, c_white))
         if self._last_black_move:
-            black_lines.append(
-                (f"落子: ({self._last_black_move[0]}, {self._last_black_move[1]})", font_pos, c_gray)
-            )
+            label = pos_to_label(self._last_black_move[0], self._last_black_move[1])
+            black_lines.append((f"落子: {label}", font_pos, c_gray))
         else:
             black_lines.append(("落子: -", font_pos, c_gray))
         if self.gm.state == GameState.PLAYING and self.gm.current_turn == StoneColor.BLACK:
@@ -645,9 +873,8 @@ class Renderer:
         if self.gm.state == GameState.PLAYING and self.gm.current_turn == StoneColor.WHITE:
             white_lines.append(("轮到你了", font_turn, c_gold))
         if self._last_white_move:
-            white_lines.append(
-                (f"落子: ({self._last_white_move[0]}, {self._last_white_move[1]})", font_pos, c_gray)
-            )
+            label = pos_to_label(self._last_white_move[0], self._last_white_move[1])
+            white_lines.append((f"落子: {label}", font_pos, c_gray))
         else:
             white_lines.append(("落子: -", font_pos, c_gray))
         white_lines.append(("玩家2", font_name, c_white))

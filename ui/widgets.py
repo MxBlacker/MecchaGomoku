@@ -205,6 +205,128 @@ class Slider:
             pygame.draw.circle(surface, (255, 255, 255), thumb.center, 12, 1)
 
 
+class TextInput:
+    """A single-line text input field with cursor and visual feedback."""
+
+    def __init__(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        text: str = "",
+        *,
+        font: pygame.font.Font | None = None,
+        placeholder: str = "",
+        password: bool = False,
+    ):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.font = font or get_font(22)
+        self.placeholder = placeholder
+        self.password = password
+        self._active = False
+        self._cursor_pos = len(text)
+        self._cursor_timer = 0.0
+        self._cursor_visible = True
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        """Return True if the event was consumed."""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self._active = self.rect.collidepoint(event.pos)
+            if self._active:
+                self._cursor_pos = len(self.text)
+            return self._active
+
+        if not self._active:
+            return False
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+                if self._cursor_pos > 0:
+                    self.text = self.text[:self._cursor_pos - 1] + self.text[self._cursor_pos:]
+                    self._cursor_pos -= 1
+                return True
+            elif event.key == pygame.K_DELETE:
+                if self._cursor_pos < len(self.text):
+                    self.text = self.text[:self._cursor_pos] + self.text[self._cursor_pos + 1:]
+                return True
+            elif event.key == pygame.K_LEFT:
+                self._cursor_pos = max(0, self._cursor_pos - 1)
+                return True
+            elif event.key == pygame.K_RIGHT:
+                self._cursor_pos = min(len(self.text), self._cursor_pos + 1)
+                return True
+            elif event.key == pygame.K_HOME:
+                self._cursor_pos = 0
+                return True
+            elif event.key == pygame.K_END:
+                self._cursor_pos = len(self.text)
+                return True
+            elif event.key == pygame.K_v and (pygame.key.get_mods() & pygame.KMOD_CTRL):
+                # Paste from clipboard
+                try:
+                    clip = pygame.scrap.get(pygame.SCRAP_TEXT)
+                    if clip:
+                        pasted = clip.decode("utf-8").replace("\r", "").replace("\n", "")
+                        self.text = self.text[:self._cursor_pos] + pasted + self.text[self._cursor_pos:]
+                        self._cursor_pos += len(pasted)
+                except Exception:
+                    pass
+                return True
+            elif event.unicode and event.unicode.isprintable():
+                self.text = self.text[:self._cursor_pos] + event.unicode + self.text[self._cursor_pos:]
+                self._cursor_pos += 1
+                return True
+
+        return False
+
+    def update(self) -> None:
+        """Update cursor blink timer (call once per frame)."""
+        self._cursor_timer += 1 / 60.0
+        if self._cursor_timer >= 0.5:
+            self._cursor_timer = 0.0
+            self._cursor_visible = not self._cursor_visible
+
+    def draw(self, surface: pygame.Surface) -> None:
+        # Background
+        bg_color = (40, 40, 55) if self._active else (30, 30, 42)
+        border_color = (100, 150, 220) if self._active else (80, 80, 100)
+        pygame.draw.rect(surface, bg_color, self.rect, border_radius=6)
+        pygame.draw.rect(surface, border_color, self.rect, width=2, border_radius=6)
+
+        # Text (or placeholder)
+        display = self.text
+        if self.password and display:
+            display = "•" * len(display)
+        if not display and self.placeholder and not self._active:
+            text_surf = self.font.render(self.placeholder, True, (120, 120, 140))
+        else:
+            text_surf = self.font.render(display, True, COLOR_TEXT)
+
+        text_rect = text_surf.get_rect(midleft=(self.rect.x + 10, self.rect.centery))
+        # Clip text if too wide
+        clip_rect = pygame.Rect(self.rect.x + 8, self.rect.y + 4,
+                                self.rect.width - 16, self.rect.height - 8)
+        surface.blit(text_surf, text_rect, clip_rect)
+
+        # Cursor
+        if self._active and self._cursor_visible:
+            cursor_x = self.rect.x + 10
+            if self._cursor_pos > 0:
+                prefix = display[:self._cursor_pos]
+                cursor_x += self.font.size(prefix)[0]
+            cursor_h = self.font.get_height()
+            cursor_y = self.rect.centery - cursor_h // 2
+            pygame.draw.line(surface, (200, 200, 220),
+                             (cursor_x, cursor_y),
+                             (cursor_x, cursor_y + cursor_h), 2)
+
+
 class Label:
     """A static text label."""
 
