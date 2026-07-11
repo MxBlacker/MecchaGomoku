@@ -18,6 +18,8 @@ from config import (
     EXIT_BUTTON_IMG, MINIMIZE_BUTTON_IMG,
     DEEPSEEK_GIRL_IMG,
     BLACK_AVATAR_IMG, WHITE_AVATAR_IMG, AVATAR_SIZE,
+    SKILL_ICON_SIZE, SKILL_USE_SOUND,
+    SKILL_GACHA_IMG, SKILL_REVERSE_IMG, SKILL_DEADZONE_IMG, SKILL_DEFENSE_IMG,
 )
 from core.game_manager import GameManager, GameState
 from core.stone import StoneColor
@@ -32,7 +34,11 @@ from ui.widgets import ImageButton
 from modes.local_pvp import LocalPvPMode
 from modes.ai_mode import AIVsMode
 from modes.replay_mode import ReplayMode
+from modes.skill_mode import SkillMode
 from modes.network.multiplayer_mode import MultiplayerMode
+from core.skill_system import SkillManager, SkillID, SkillResult
+from ui.skill_widget import SkillPanel
+from ui.skill_effects import SkillEffects
 from utils.asset_loader import (
     get_place_sound, get_victory_sound, load_background,
     play_sfx, set_sfx_volume,
@@ -129,6 +135,13 @@ class Renderer:
         # Popup (created when game ends)
         self._popup: Optional[Popup] = None
 
+        # Skill Gomoku objects (created in _on_start_skill)
+        self._skill_mgr: Optional[SkillManager] = None
+        self._skill_panel_left: Optional[SkillPanel] = None
+        self._skill_panel_right: Optional[SkillPanel] = None
+        self._skill_effects: Optional[SkillEffects] = None
+        self._skill_use_sound: Optional[pygame.mixer.Sound] = None
+
         # Screen state
         self._screen = "menu"  # "menu" | "game" | "history" | "settings" | "replay"
         self._current_screen: Optional[MainMenu | SettingsScreen | HistoryScreen] = None
@@ -155,6 +168,8 @@ class Renderer:
             # Per-frame updates
             if self._active_mode:
                 self._active_mode.update()
+            if self._skill_effects:
+                self._skill_effects.update(dt)
 
             self._draw()
             pygame.display.flip()
@@ -292,14 +307,68 @@ class Renderer:
         # Stone placement particle bursts
         self._fx.draw_bursts(self.screen)
 
+        # ── Skill effects (dead zones, yin-yang, defence glow) ──
+        if self._skill_effects and self._screen == "game":
+            board_center_x = BOARD_OFFSET_X + self._board_px_w // 2
+            board_center_y = BOARD_OFFSET_Y + self._board_px_h // 2
+
+            # Compute avatar rects for defence-glow positioning
+            board_left = BOARD_OFFSET_X
+            board_top = BOARD_OFFSET_Y
+            board_bottom = BOARD_OFFSET_Y + self._board_px_h
+            gap = 15
+
+            black_rect = None
+            if self._black_avatar:
+                ax = board_left - AVATAR_SIZE - gap
+                ay = board_top + 25
+                black_rect = pygame.Rect(ax, ay, AVATAR_SIZE, AVATAR_SIZE)
+
+            white_rect = None
+            if self._white_avatar:
+                ax = board_left + self._board_px_w + gap
+                ay = board_bottom - 25 - AVATAR_SIZE
+                white_rect = pygame.Rect(ax, ay, AVATAR_SIZE, AVATAR_SIZE)
+
+            self._skill_effects.draw_all(
+                self.screen,
+                board_center=(board_center_x, board_center_y),
+                black_avatar_rect=black_rect,
+                white_avatar_rect=white_rect,
+            )
+
         # Player info panels (avatars + move history)
         self._draw_player_panels()
 
+        # ── Skill panels (icon grids on both sides) ─────
+        if self._skill_mgr and self._skill_panel_left and self._skill_panel_right \
+                and self._screen == "game":
+            # Build availability / cooldown maps for each player
+            if isinstance(self._active_mode, SkillMode):
+                black_avail = self._active_mode._build_available_map(StoneColor.BLACK)
+                white_avail = self._active_mode._build_available_map(StoneColor.WHITE)
+                black_cd = self._active_mode.get_cooldown_map(StoneColor.BLACK)
+                white_cd = self._active_mode.get_cooldown_map(StoneColor.WHITE)
+            else:
+                black_avail = {sid: False for sid in SkillID}
+                white_avail = {sid: False for sid in SkillID}
+                black_cd = {sid: 0 for sid in SkillID}
+                white_cd = {sid: 0 for sid in SkillID}
+
+            self._skill_panel_left.draw(
+                self.screen, black_avail, black_cd, tooltip_side="right")
+            self._skill_panel_right.draw(
+                self.screen, white_avail, white_cd, tooltip_side="left")
+
         # Hover ghost stone preview (PvP and multiplayer)
+        # Skip normal preview during gacha first-stone (flickering preview is drawn by effects)
+        is_gacha_hover = (isinstance(self._active_mode, SkillMode)
+                          and self._active_mode._is_gacha_first())
         if (self._active_mode
                 and hasattr(self._active_mode, "hover_pos")
                 and self._active_mode.hover_pos is not None
-                and self.gm.state == GameState.PLAYING):
+                and self.gm.state == GameState.PLAYING
+                and not is_gacha_hover):
             r, c = self._active_mode.hover_pos
             self.board_view.draw_hover_preview(self.screen, r, c, self.gm.current_turn)
 
@@ -760,6 +829,18 @@ class Renderer:
         self._last_white_move = None
         self._screen = "game"
 
+    # ── Skill callbacks ─────────────────────────────────
+
+    def _on_skill_activate(self, color: StoneColor, skill_id: SkillID) -> None:
+        """Forwarded from SkillPanel → SkillMode."""
+        if isinstance(self._active_mode, SkillMode):
+            self._active_mode._on_use_skill(color, skill_id)
+
+    def _play_skill_sfx(self) -> None:
+        """Play the skill-activation sound effect."""
+        if self._skill_use_sound:
+            self._skill_use_sound.play()
+
     def _on_start_ai(self) -> None:
         """Show color-choice popup, then start AI game with chosen color."""
         def on_choose(color_name: str):
@@ -815,8 +896,68 @@ class Renderer:
         self._popup = Popup(message, on_dismiss=self._on_popup_dismiss)
 
     def _on_start_skill(self) -> None:
+        """Start a Skill Gomoku game with the full skill system."""
         self.gm.game_mode = "skill"
-        self._active_mode = LocalPvPMode(self.gm, self.board_view)
+
+        # Create skill manager (fresh state per game)
+        self._skill_mgr = SkillManager()
+
+        # Skill icon paths
+        icon_paths = {
+            SkillID.GACHA:   SKILL_GACHA_IMG,
+            SkillID.REVERSE: SKILL_REVERSE_IMG,
+            SkillID.DEADZONE: SKILL_DEADZONE_IMG,
+            SkillID.DEFENSE: SKILL_DEFENSE_IMG,
+        }
+
+        # Board area reference points
+        board_center_x = BOARD_OFFSET_X + self._board_px_w // 2
+        board_center_y = BOARD_OFFSET_Y + self._board_px_h // 2
+
+        # Left skill panel (Black) — between window left edge and black avatar
+        left_x = 80
+        self._skill_panel_left = SkillPanel(
+            center_x=left_x,
+            center_y=board_center_y,
+            icon_size=SKILL_ICON_SIZE,
+            icon_spacing=16,
+            owner_color=StoneColor.BLACK,
+            icon_paths=icon_paths,
+            on_use_skill=self._on_skill_activate,
+        )
+
+        # Right skill panel (White) — between white avatar and window right edge
+        right_x = WINDOW_WIDTH - 80
+        self._skill_panel_right = SkillPanel(
+            center_x=right_x,
+            center_y=board_center_y,
+            icon_size=SKILL_ICON_SIZE,
+            icon_spacing=16,
+            owner_color=StoneColor.WHITE,
+            icon_paths=icon_paths,
+            on_use_skill=self._on_skill_activate,
+        )
+
+        # Visual effects
+        self._skill_effects = SkillEffects(self.board_view)
+
+        # Skill SFX
+        self._skill_use_sound = None
+        try:
+            self._skill_use_sound = pygame.mixer.Sound(SKILL_USE_SOUND)
+        except FileNotFoundError:
+            pass
+
+        # Create and activate skill mode
+        self._active_mode = SkillMode(
+            game_manager=self.gm,
+            board_view=self.board_view,
+            skill_manager=self._skill_mgr,
+            panel_left=self._skill_panel_left,
+            panel_right=self._skill_panel_right,
+            effects=self._skill_effects,
+            on_play_sfx=self._play_skill_sfx,
+        )
         self._active_mode.on_enter()
         self._prev_move_count = 0
         self._last_black_move = None

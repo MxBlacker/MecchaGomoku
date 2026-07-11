@@ -102,6 +102,23 @@ SETTINGS_FILE   = f"{DATA_DIR}/settings.json"
 # ── BGM ────────────────────────────────────────────────
 BGM_DIR        = f"{ASSETS_DIR}/bgm"
 
+# ── Skill Gomoku ─────────────────────────────────────────
+SKILL_ICON_SIZE = 64
+SKILL_GACHA_IMG    = f"{IMG_DIR}/skill_gacha.png"
+SKILL_REVERSE_IMG  = f"{IMG_DIR}/skill_reverse.png"
+SKILL_DEADZONE_IMG = f"{IMG_DIR}/skill_deadzone.png"
+SKILL_DEFENSE_IMG  = f"{IMG_DIR}/skill_defense.png"
+SKILL_YINYANG_IMG  = f"{IMG_DIR}/skill_yinyang.png"
+SKILL_DEFENSE_GLOW_IMG = f"{IMG_DIR}/skill_defense_glow.png"
+SKILL_USE_SOUND    = f"{SFX_DIR}/use_skill.mp3"
+
+# Skill cooldowns (in rounds)
+SKILL_GACHA_COOLDOWN   = 3
+SKILL_DEADZONE_COOLDOWN = 6
+SKILL_DEFENSE_COOLDOWN  = 5
+SKILL_REVERSE_MAX_ROUND = 5   # 扭转乾坤 only usable in first 5 rounds
+SKILL_DEADZONE_DURATION = 2   # dead zone lasts 2 rounds
+
 # ── Fonts ───────────────────────────────────────────────
 FONTS_DIR = f"{ASSETS_DIR}/fonts"
 CJK_FONT  = f"{FONTS_DIR}/NotoSansSC-VF.ttf"
